@@ -350,12 +350,9 @@ input:focus,textarea:focus,select:focus{outline:2px solid #cfe0ff;border-color:v
 .resume.page-Legal{width:215.9mm;min-height:355.6mm;}
 
 /* ---------- Print ---------- */
-#printMount{display:none;}
 @media print{
   html,body{margin:0 !important;padding:0 !important;background:#fff !important;}
-  body.printing > *{display:none !important;}
-  body.printing > #printMount{display:block !important;}
-  #printMount .resume{
+  .resume{
     box-shadow:none !important;
     margin:0 !important;
     /* Repeat the top/bottom padding on every printed page instead of only
@@ -365,13 +362,13 @@ input:focus,textarea:focus,select:focus{outline:2px solid #cfe0ff;border-color:v
   }
   /* Keep a single job / education entry together so a bullet list is never
      stranded alone at the top of the next page */
-  #printMount .r-job,
-  #printMount .r-edu-row{
+  .r-job,
+  .r-edu-row{
     break-inside:avoid;
     page-break-inside:avoid;
   }
   /* Never leave a section title orphaned at the bottom of a page */
-  #printMount .r-sec-title{
+  .r-sec-title{
     break-after:avoid;
     page-break-after:avoid;
   }
@@ -382,10 +379,25 @@ input:focus,textarea:focus,select:focus{outline:2px solid #cfe0ff;border-color:v
   .form-panel{width:100%;max-width:none;}
   .preview-panel{min-height:600px;}
 }
+
+/* ---------- Phone / small-tablet polish ---------- */
+@media (max-width:600px){
+  .topbar{padding:10px 12px;gap:8px;}
+  .topbar h1{font-size:15px;}
+  .topbar .status{display:none;}
+  .btn{padding:8px 10px;font-size:12px;}
+  .form-panel{padding:14px 12px 50px;}
+  .card{padding:12px 12px 14px;}
+  .row{gap:8px;}
+  .field{min-width:130px;}
+  .preview-toolbar{padding:10px 12px;gap:8px;}
+  .tpl-btn{padding:5px 9px;font-size:11.5px;}
+  .zoom-controls{margin-left:0;}
+  .page-outer{padding:16px 10px;}
+}
 </style>
 </head>
 <body>
-<div id="printMount"></div>
 <div class="app">
 
   <div class="topbar">
@@ -505,7 +517,7 @@ English (Professional)"></textarea></div>
           <button id="zoomIn">+</button>
         </div>
       </div>
-      <div class="page-outer">
+      <div class="page-outer" id="pageOuter">
         <div class="page-wrap" id="pageWrap">
           <div class="resume tpl-modern page-A4" id="preview"></div>
         </div>
@@ -1001,14 +1013,31 @@ $all(".tpl-btn").forEach(function(btn){
 
 /* ================= Zoom ================= */
 var pageWrap = $("#pageWrap");
+var pageOuter = $("#pageOuter");
 function applyZoom(){
   pageWrap.style.transform = "scale("+zoom+")";
   var h = PAGE_DIMENSIONS_MM[pageSize].h;
   pageWrap.style.marginBottom = (h * zoom - h) + "mm";
   $("#zoomLabel").textContent = Math.round(zoom*100)+"%";
 }
-$("#zoomIn").addEventListener("click",function(){ zoom = Math.min(1.3, zoom+0.1); applyZoom(); });
-$("#zoomOut").addEventListener("click",function(){ zoom = Math.max(0.3, zoom-0.1); applyZoom(); });
+/* On phones/tablets, shrink the preview so the full page width fits on
+   screen instead of forcing horizontal scrolling. Desktop keeps the
+   default 70% zoom untouched. */
+var MM_TO_PX = 3.7795275591;
+var userSetZoom = false;
+function autoFitZoom(){
+  if(userSetZoom || !pageOuter) return;
+  if(window.innerWidth > 980) return;
+  var available = pageOuter.clientWidth - 24;
+  var pageWpx = PAGE_DIMENSIONS_MM[pageSize].w * MM_TO_PX;
+  var fit = available / pageWpx;
+  fit = Math.max(0.32, Math.min(0.7, fit));
+  zoom = Math.round(fit*100)/100;
+  applyZoom();
+}
+window.addEventListener("resize", autoFitZoom);
+$("#zoomIn").addEventListener("click",function(){ userSetZoom = true; zoom = Math.min(1.3, zoom+0.1); applyZoom(); });
+$("#zoomOut").addEventListener("click",function(){ userSetZoom = true; zoom = Math.max(0.3, zoom-0.1); applyZoom(); });
 applyZoom();
 
 /* ================= Page size selector ================= */
@@ -1105,40 +1134,75 @@ $("#btnSample").addEventListener("click",function(){
   saveDraft();
 });
 
-/* ================= PDF export (clean print-mount, no blank pages) ================= */
+/* ================= PDF export (isolated print window, no blank pages) =================
+   Some mobile browsers (seen on certain Android/OEM browsers doing
+   "Save as PDF") do not reliably respect display:none applied to sibling
+   elements right before window.print() is called on the main page — the
+   print snapshot can end up including the whole form UI as extra pages
+   instead of just the resume, no matter how the hiding is timed.
+
+   The robust fix is to never let the form exist in the document being
+   printed at all: open a brand-new, blank browser tab/window that
+   contains ONLY the resume markup (plus the app's CSS, copied wholesale
+   so the resume renders pixel-identical), then call print() on THAT
+   window. Since the extra content is never present there, it cannot
+   possibly show up in the PDF/printout — this sidesteps the timing bug
+   entirely instead of racing against it. */
 var PRINT_PAGE_CSS_NAME = { A4:"A4", Letter:"letter", Legal:"legal" };
 $("#btnPdf").addEventListener("click",function(){
-  var printMount = $("#printMount");
+  // Open the window synchronously, first thing in the click handler, so
+  // mobile popup blockers still recognize this as a direct user action.
+  var printWin = window.open("", "_blank");
+  if(!printWin){
+    alert("Please allow pop-ups for this page, then tap PDF Download again. (Some mobile browsers block new tabs unless pop-ups are allowed.)");
+    return;
+  }
+
+  var d = collectData();
   var clone = preview.cloneNode(true);
   clone.removeAttribute("id");
   clone.style.transform = "none";
   clone.style.margin = "0";
-  printMount.innerHTML = "";
-  printMount.appendChild(clone);
 
-  var styleTag = document.getElementById("dynamicPrintPageStyle");
-  if(!styleTag){
-    styleTag = document.createElement("style");
-    styleTag.id = "dynamicPrintPageStyle";
-    document.head.appendChild(styleTag);
+  var appStyles = document.querySelector("style") ? document.querySelector("style").innerHTML : "";
+  var docTitle = (d.personal.fullName || "Resume") + " - Resume";
+
+  var html = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"+
+    "<title>"+docTitle.replace(/</g,"&lt;")+"</title>"+
+    "<style>"+appStyles+"</style>"+
+    "<style>"+
+      "html,body{margin:0 !important;padding:0 !important;background:#fff !important;}"+
+      "body{display:flex;justify-content:center;padding:16px 0;}"+
+      ".resume{box-shadow:none !important;}"+
+      "@page{ size:"+PRINT_PAGE_CSS_NAME[pageSize]+"; margin:0; }"+
+      "@media print{ body{padding:0;} }"+
+    "</style>"+
+    "</head><body>"+clone.outerHTML+"</body></html>";
+
+  printWin.document.open();
+  printWin.document.write(html);
+  printWin.document.close();
+
+  function triggerPrint(){
+    try{
+      printWin.focus();
+      printWin.print();
+    }catch(err){
+      console.error(err);
+    }
   }
-  styleTag.textContent = "@page{ size:"+PRINT_PAGE_CSS_NAME[pageSize]+"; margin:0; }";
 
-  document.body.classList.add("printing");
-
-  function cleanup(){
-    document.body.classList.remove("printing");
-    printMount.innerHTML = "";
-    window.removeEventListener("afterprint", cleanup);
+  // Wait for the new document (and its images, e.g. the profile photo) to
+  // finish loading before printing, with a fallback in case 'load' never
+  // fires in some embedded/WebView browsers.
+  var printed = false;
+  function safePrint(){
+    if(printed) return;
+    printed = true;
+    triggerPrint();
   }
-  window.addEventListener("afterprint", cleanup);
-
-  // Fallback cleanup in case afterprint doesn't fire (some browsers on some OSes)
-  setTimeout(function(){
-    if(document.body.classList.contains("printing")) cleanup();
-  }, 3000);
-
-  window.print();
+  printWin.addEventListener("load", function(){ setTimeout(safePrint, 150); });
+  setTimeout(safePrint, 1200);
 });
 
 /* ================= Minimal offline ZIP writer (STORE method, no compression) ================= */
@@ -1381,6 +1445,7 @@ document.getElementById("formPanel").addEventListener("change", function(){
   if($all("[data-exp]",expListEl).length===0) addExperience();
   if($all("[data-edu]",eduListEl).length===0) addEducation();
   applyZoom();
+  autoFitZoom();
   renderPreview();
 })();
 
