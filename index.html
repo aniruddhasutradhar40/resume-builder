@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ATS Resume Builder Pro | Offline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --navy:#12294d;
@@ -396,6 +399,73 @@ input:focus,textarea:focus,select:focus{outline:2px solid #cfe0ff;border-color:v
   .page-outer{padding:16px 10px;}
 }
 </style>
+<style>
+/* ===== Neumorphic app theme (UI only — resume templates untouched; second <style> so the PDF print window does not copy it) ===== */
+:root{
+  --n-bg:#e8eaf2; --n-ink:#2b2d4a; --n-navy:#232552; --n-muted:#5f6580; --n-blue:#3b4cca;
+  --n-sd:rgba(163,170,196,.55); --n-sl:rgba(255,255,255,.95);
+  --n-raised:8px 8px 22px var(--n-sd),-8px -8px 22px var(--n-sl);
+  --n-small:4px 4px 10px var(--n-sd),-4px -4px 10px var(--n-sl);
+  --n-inset:inset 3px 3px 8px rgba(163,170,196,.5),inset -3px -3px 8px rgba(255,255,255,.9);
+  --n-grad:linear-gradient(145deg,#eceef5,#e3e6ef);
+  --n-btn:linear-gradient(145deg,#4558e0,#3140b8);
+}
+body{background:var(--n-bg);}
+.topbar,.form-panel,.preview-toolbar{font-family:"Poppins","Hind Siliguri","Noto Sans Bengali","Segoe UI",Arial,sans-serif;color:var(--n-ink);}
+
+/* Top bar */
+.topbar{background:var(--n-bg);color:var(--n-navy);box-shadow:0 8px 22px var(--n-sd);border-bottom:1px solid rgba(255,255,255,.7);}
+.topbar h1{color:var(--n-navy);font-weight:600;}
+.topbar h1 span{color:var(--n-blue);}
+.topbar .status{color:var(--n-muted);}
+
+/* Buttons */
+.btn{border-radius:14px;font-family:inherit;}
+.btn-ghost,.btn-outline,.btn-danger{background:var(--n-grad);color:var(--n-navy);border:0;box-shadow:var(--n-small);}
+.btn-ghost:hover,.btn-outline:hover{background:var(--n-grad);box-shadow:6px 6px 14px var(--n-sd),-6px -6px 14px var(--n-sl);}
+.btn-danger{color:#b42318;}
+.btn-primary{background:var(--n-btn);color:#fff;box-shadow:5px 5px 12px rgba(59,76,202,.32),-4px -4px 10px var(--n-sl);}
+.btn-primary:hover{background:var(--n-btn);filter:brightness(1.06);}
+.btn:active{box-shadow:var(--n-inset);}
+.btn-primary:active{box-shadow:inset 3px 3px 8px rgba(0,0,0,.25);}
+.btn:focus-visible,.tpl-btn:focus-visible,.add-btn:focus-visible{outline:3px solid var(--n-blue);outline-offset:3px;}
+
+/* Form panel + cards */
+.form-panel{background:var(--n-bg);padding:22px 22px 70px;}
+.card{background:var(--n-grad);border:1px solid rgba(255,255,255,.7);border-radius:24px;box-shadow:var(--n-raised);padding:20px 20px 22px;margin-bottom:22px;}
+.card h2{color:var(--n-navy);font-weight:600;}
+.card h2 .num{background:var(--n-btn);box-shadow:3px 3px 8px rgba(59,76,202,.3);}
+label{color:var(--n-muted);}
+.hint,.list-textarea-hint,.check-row{color:var(--n-muted);}
+input[type=text],input[type=email],input[type=tel],input[type=url],input[type=month],textarea,select{
+  background:var(--n-bg);border:0;border-radius:14px;box-shadow:var(--n-inset);padding:10px 14px;color:var(--n-ink);font-family:inherit;}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--n-blue);border-color:transparent;}
+input[type=file]{font-family:inherit;font-size:12px;color:var(--n-muted);}
+.photo-preview{background-color:var(--n-bg);border:0;box-shadow:var(--n-inset);color:var(--n-muted);}
+.exp-block,.edu-block{background:var(--n-bg);border:0;border-radius:18px;box-shadow:var(--n-inset);padding:16px;}
+.block-title{color:var(--n-navy);}
+.remove-btn{font-family:inherit;color:#b42318;}
+.add-btn{background:var(--n-grad);border:0;color:var(--n-blue);border-radius:16px;box-shadow:var(--n-small);padding:12px;font-family:inherit;}
+.add-btn:hover{box-shadow:6px 6px 14px var(--n-sd),-6px -6px 14px var(--n-sl);}
+.add-btn:active{box-shadow:var(--n-inset);}
+
+/* Preview panel + toolbar */
+.preview-panel{background:#dfe2ec;}
+.preview-toolbar{background:var(--n-bg);border-bottom:1px solid rgba(255,255,255,.7);box-shadow:0 6px 16px var(--n-sd);padding:12px 20px;}
+.tpl-btn{background:var(--n-grad);border:0;color:var(--n-muted);box-shadow:var(--n-small);font-family:inherit;padding:8px 16px;}
+.tpl-btn.active{background:var(--n-bg);color:var(--n-blue);box-shadow:var(--n-inset);}
+.zoom-controls button{background:var(--n-grad);border:0;border-radius:10px;box-shadow:var(--n-small);color:var(--n-navy);width:30px;height:30px;}
+.zoom-controls button:active{box-shadow:var(--n-inset);}
+#pageSizeSelect{border:0 !important;border-radius:10px !important;padding:6px 10px !important;}
+
+@media (max-width:600px){
+  .form-panel{padding:14px 12px 50px;}
+  .card{padding:14px 14px 16px;border-radius:22px;}
+  .topbar{padding:10px 12px;}
+}
+@media print{ .topbar,.form-panel,.preview-toolbar{display:none !important;} }
+</style>
+
 </head>
 <body>
 <div class="app">
@@ -1099,7 +1169,7 @@ function sampleData(){
     pageSize:"A4",
     photo:null,
     personal:{
-      fullName:"Aniruddha Sutradhar",
+      fullName:"Jony Roy",
       jobTitle:"Accounting & Finance Professional | BBA in Accounting",
       phone:"+880 1XXXXXXXXX",
       email:"your.email@gmail.com",
