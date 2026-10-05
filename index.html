@@ -1357,143 +1357,291 @@ function createZip(files){
   return new Blob(parts, {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
 }
 
-/* ================= Minimal offline DOCX (OOXML) generator ================= */
-function docxXmlEscape(s){
+/* ================= Template-aware offline DOCX (OOXML) generator =================
+   Every template (Modern Navy, Minimal ATS-Safe, Classic Serif) now exports its own
+   Word layout. The Modern template also embeds the profile photo (if uploaded). */
+function dx(s){
   return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
-function docxRun(text, opts){
-  opts = opts||{};
-  var props = "";
-  if(opts.bold) props += "<w:b/>";
-  if(opts.italics) props += "<w:i/>";
-  if(opts.size) props += "<w:sz w:val=\""+Math.round(opts.size*2)+"\"/>";
-  if(opts.color) props += "<w:color w:val=\""+opts.color+"\"/>";
-  var rPr = props ? "<w:rPr>"+props+"</w:rPr>" : "";
-  return "<w:r>"+rPr+"<w:t xml:space=\"preserve\">"+docxXmlEscape(text)+"</w:t></w:r>";
+var DOCX_THEMES = {
+  modern:{
+    font:"Calibri", ink:"1C2430", nameColor:"12294D", nameSize:26, nameCaps:true, nameSpacing:10,
+    headAlign:"left", subColor:"1C2D6E", titleColor:"12294D", titleRule:"12294D", titleAlign:"left",
+    titleSpacing:8, companyColor:"1C3F6E", companyBold:true, companyItalic:false,
+    labelColor:"1C3F6E", compBullet:true, compAlign:"left", sepText:"   |   ", dateColor:"1C3F6E", bodyAlign:"left"
+  },
+  minimal:{
+    font:"Arial", ink:"000000", nameColor:"000000", nameSize:22, nameCaps:true, nameSpacing:40,
+    headAlign:"center", subColor:"444444", titleColor:"000000", titleRule:"000000", titleAlign:"left",
+    titleSpacing:30, companyColor:"000000", companyBold:false, companyItalic:true,
+    labelColor:"000000", compBullet:false, compAlign:"left", sepText:"  |  ", dateColor:"444444", bodyAlign:"left"
+  },
+  classic:{
+    font:"Georgia", ink:"1C2430", nameColor:"1C2430", nameSize:21, nameCaps:false, nameSpacing:20,
+    headAlign:"center", subColor:"444444", titleColor:"1C2430", titleRule:"333333", titleAlign:"center",
+    titleSpacing:40, companyColor:"1C2430", companyBold:false, companyItalic:true,
+    labelColor:"1C2430", compBullet:false, compAlign:"center", sepText:"  •  ", dateColor:"444444", bodyAlign:"both"
+  }
+};
+
+function dxRun(text, o){
+  o = o||{};
+  var f = o.font ? "<w:rFonts w:ascii=\""+o.font+"\" w:hAnsi=\""+o.font+"\" w:cs=\"Nirmala UI\" w:eastAsia=\""+o.font+"\"/>" : "";
+  var p = f;
+  if(o.bold) p += "<w:b/><w:bCs/>";
+  if(o.italics) p += "<w:i/><w:iCs/>";
+  if(o.caps) p += "<w:caps/>";
+  if(o.color) p += "<w:color w:val=\""+o.color+"\"/>";
+  if(o.spacing) p += "<w:spacing w:val=\""+o.spacing+"\"/>";
+  if(o.size) p += "<w:sz w:val=\""+Math.round(o.size*2)+"\"/><w:szCs w:val=\""+Math.round(o.size*2)+"\"/>";
+  return "<w:r>"+(p?"<w:rPr>"+p+"</w:rPr>":"")+"<w:t xml:space=\"preserve\">"+dx(text)+"</w:t></w:r>";
 }
-function docxPara(runsXml, opts){
-  opts = opts||{};
-  var pPr = "";
-  if(opts.align) pPr += "<w:jc w:val=\""+opts.align+"\"/>";
-  var before = opts.spacingBefore||0, after = (opts.spacingAfter!=null?opts.spacingAfter:120);
-  pPr += "<w:spacing w:before=\""+before+"\" w:after=\""+after+"\"/>";
-  if(opts.bullet) pPr += "<w:ind w:left=\"360\" w:hanging=\"360\"/>";
-  pPr = "<w:pPr>"+pPr+"</w:pPr>";
-  return "<w:p>"+pPr+(runsXml||"")+"</w:p>";
+function dxTab(){ return "<w:r><w:tab/></w:r>"; }
+function dxPara(inner, o){
+  o = o||{};
+  var p = "";
+  if(o.keepNext) p += "<w:keepNext/>";
+  if(o.rule) p += "<w:pBdr><w:bottom w:val=\"single\" w:sz=\""+(o.ruleSz||8)+"\" w:space=\"2\" w:color=\""+o.rule+"\"/></w:pBdr>";
+  if(o.rightTab) p += "<w:tabs><w:tab w:val=\"right\" w:pos=\""+o.rightTab+"\"/></w:tabs>";
+  p += "<w:spacing w:before=\""+(o.before||0)+"\" w:after=\""+(o.after!=null?o.after:60)+"\"/>";
+  if(o.bullet) p += "<w:ind w:left=\"360\" w:hanging=\"260\"/>";
+  if(o.align) p += "<w:jc w:val=\""+o.align+"\"/>";
+  return "<w:p><w:pPr>"+p+"</w:pPr>"+(inner||"")+"</w:p>";
+}
+function dxTable(widths, rows){
+  var total = widths.reduce(function(a,b){return a+b;},0);
+  var x = "<w:tbl><w:tblPr><w:tblW w:w=\""+total+"\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>"+
+    "<w:tblCellMar><w:left w:w=\"0\" w:type=\"dxa\"/><w:right w:w=\"140\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>"+
+    widths.map(function(w){return "<w:gridCol w:w=\""+w+"\"/>";}).join("")+"</w:tblGrid>";
+  rows.forEach(function(r){
+    x += "<w:tr>";
+    r.forEach(function(c,i){
+      x += "<w:tc><w:tcPr><w:tcW w:w=\""+widths[i]+"\" w:type=\"dxa\"/></w:tcPr>"+(c||dxPara("",{after:0}))+"</w:tc>";
+    });
+    x += "</w:tr>";
+  });
+  return x+"</w:tbl>";
+}
+
+/* Crop the photo to a square and re-encode as JPEG so Word always accepts it */
+function photoToJpegBytes(dataUrl){
+  return new Promise(function(resolve, reject){
+    var img = new Image();
+    img.onload = function(){
+      try{
+        var S = 480, c = document.createElement("canvas");
+        c.width = S; c.height = S;
+        var ctx = c.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,S,S);
+        var side = Math.min(img.width, img.height);
+        var sx = (img.width - side)/2, sy = (img.height - side)/2;
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, S, S);
+        var b64 = c.toDataURL("image/jpeg", 0.9).split(",")[1];
+        var bin = atob(b64), bytes = new Uint8Array(bin.length);
+        for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+        resolve(bytes);
+      }catch(e){ reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+function dxPhotoXml(mm){
+  var emu = Math.round(mm*36000);
+  return "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"+
+    "<wp:extent cx=\""+emu+"\" cy=\""+emu+"\"/><wp:docPr id=\"1\" name=\"Profile Photo\"/>"+
+    "<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>"+
+    "<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">"+
+    "<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"0\" name=\"photo.jpg\"/><pic:cNvPicPr/></pic:nvPicPr>"+
+    "<pic:blipFill><a:blip r:embed=\"rIdPhoto1\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"+
+    "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\""+emu+"\" cy=\""+emu+"\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>"+
+    "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>";
+}
+
+function buildDocx(d, imgBytes){
+  var T = DOCX_THEMES[d.template] || DOCX_THEMES.modern;
+  var pageDims = { A4:{w:11906,h:16838}, Letter:{w:12240,h:15840}, Legal:{w:12240,h:20160} };
+  var pd = pageDims[d.pageSize] || pageDims.A4;
+  var MARGIN = 794;
+  var CW = pd.w - MARGIN*2;
+  var F = T.font;
+  var out = [];
+
+  function R(text,o){ o=o||{}; o.font=F; return dxRun(text,o); }
+
+  function sectionTitle(text){
+    return dxPara(R(text,{bold:true,size:(d.template==="modern"?11.5:(d.template==="minimal"?10.5:11)),color:T.titleColor,caps:true,spacing:T.titleSpacing}),
+      {keepNext:true,before:220,after:90,rule:T.titleRule,ruleSz:(d.template==="classic"?12:10),align:T.titleAlign});
+  }
+  function bulletPara(text,align){
+    return dxPara(R("•  ",{size:10,color:T.labelColor})+R(text,{size:10,color:T.ink}),{bullet:true,after:40,align:align});
+  }
+
+  /* ---------- Header ---------- */
+  var p = d.personal;
+  var contact = [p.phone,p.email,p.linkedin,p.website,p.location].filter(Boolean).join(T.sepText);
+  var headParas = "";
+  var nameText = p.fullName || "Your Full Name";
+  var al = T.headAlign;
+  headParas += dxPara(R(nameText,{bold:true,size:T.nameSize,color:T.nameColor,caps:T.nameCaps,spacing:T.nameSpacing}),{after:30,align:al});
+  headParas += dxPara(R(p.jobTitle || "Your Job Title",{size:d.template==="modern"?12:10.5,bold:d.template==="modern",italics:d.template==="classic",color:T.subColor}),{after:70,align:al});
+  if(contact) headParas += dxPara(R(contact,{size:9.5,color:"333333"}),{after:80,align:al});
+
+  var usePhoto = (d.template==="modern" && imgBytes);
+  if(usePhoto){
+    var photoW = 1750;
+    out.push(dxTable([CW-photoW, photoW],[[headParas, dxPara(dxPhotoXml(26),{after:0,align:"right"})]]));
+    out.push(dxPara("",{after:60,rule:T.titleRule,ruleSz:24}));
+  } else {
+    out.push(headParas);
+    out.push(dxPara("",{after:40,rule:T.titleRule,ruleSz:(d.template==="modern"?24:8)}));
+  }
+
+  /* ---------- Summary ---------- */
+  if(d.summary && d.summary.trim()){
+    out.push(sectionTitle("Professional Summary"));
+    out.push(dxPara(R(d.summary.replace(/\s*\n\s*/g," "),{size:10,color:T.ink}),{after:80,align:T.bodyAlign}));
+  }
+
+  /* ---------- Core competencies (3-column grid like the preview) ---------- */
+  if(d.competencies.length){
+    out.push(sectionTitle("Core Competencies"));
+    var cw3 = Math.floor(CW/3), rows = [];
+    for(var i=0;i<d.competencies.length;i+=3){
+      var row = [];
+      for(var j=0;j<3;j++){
+        var item = d.competencies[i+j];
+        if(item){
+          var inner = T.compBullet
+            ? R("•  ",{size:9.5,color:T.labelColor})+R(item,{size:9.5,color:T.ink})
+            : R(item,{size:9.5,color:T.ink});
+          row.push(dxPara(inner,{after:30,align:T.compAlign}));
+        } else row.push(dxPara("",{after:0}));
+      }
+      rows.push(row);
+    }
+    out.push(dxTable([cw3,cw3,CW-cw3*2], rows));
+  }
+
+  /* ---------- Work experience ---------- */
+  if(d.experience.length){
+    out.push(sectionTitle("Work Experience"));
+    d.experience.forEach(function(exp){
+      var dateStr = [exp.start,exp.end].filter(Boolean).join(" – ");
+      out.push(dxPara(R(exp.title||"",{bold:true,size:10.5,color:T.ink})+dxTab()+R(dateStr,{size:9.5,bold:d.template==="modern",color:T.dateColor}),
+        {keepNext:true,rightTab:CW,before:100,after:10}));
+      if(exp.company || exp.location){
+        out.push(dxPara(R(exp.company||"",{bold:T.companyBold,italics:T.companyItalic,size:10,color:T.companyColor})+dxTab()+R(exp.location||"",{size:9,color:"555555"}),
+          {keepNext:true,rightTab:CW,after:50}));
+      }
+      var ach = linesToArray(exp.achievements), resp = linesToArray(exp.responsibilities);
+      if(ach.length){
+        out.push(dxPara(R("Key Achievements",{bold:true,size:9.5,color:T.labelColor}),{keepNext:true,before:40,after:20}));
+        ach.forEach(function(l){ out.push(bulletPara(l)); });
+      }
+      if(resp.length){
+        out.push(dxPara(R("Responsibilities",{bold:true,size:9.5,color:T.labelColor}),{keepNext:true,before:40,after:20}));
+        resp.forEach(function(l){ out.push(bulletPara(l)); });
+      }
+    });
+  }
+
+  /* ---------- Education ---------- */
+  if(d.education.length){
+    out.push(sectionTitle("Educational Qualifications"));
+    d.education.forEach(function(edu){
+      var dateStr = [edu.start,edu.end].filter(Boolean).join(" – ");
+      out.push(dxPara(R(edu.degree||"",{bold:true,size:10,color:T.ink})+dxTab()+R(dateStr,{size:9.5,color:"444444"}),
+        {keepNext:true,rightTab:CW,before:50,after:10}));
+      if(edu.institution) out.push(dxPara(R(edu.institution,{size:9.5,color:"555555"}),{after:60}));
+    });
+  }
+
+  /* ---------- Certifications + Technical skills (2 columns) ---------- */
+  if(d.certifications.length || d.skills.length){
+    var half = Math.floor(CW/2);
+    function colBlock(title,list){
+      if(!list.length) return dxPara("",{after:0});
+      return sectionTitle(title) + list.map(function(l){ return bulletPara(l); }).join("");
+    }
+    out.push(dxTable([half,CW-half],[[colBlock("Training & Certifications",d.certifications), colBlock("Technical Skills",d.skills)]]));
+  }
+
+  /* ---------- Languages + References (2 columns) ---------- */
+  if(d.languages.length || d.references){
+    var half2 = Math.floor(CW/2);
+    var langCell = d.languages.length ? sectionTitle("Languages")+dxPara(R(d.languages.join("  |  "),{size:9.5,color:T.ink}),{after:40}) : dxPara("",{after:0});
+    var refCell = d.references ? sectionTitle("References")+dxPara(R(d.references,{size:9.5,color:T.ink}),{after:40}) : dxPara("",{after:0});
+    out.push(dxTable([half2,CW-half2],[[langCell,refCell]]));
+  }
+  out.push(dxPara("",{after:0}));
+
+  /* ---------- Package parts ---------- */
+  var NS = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "+
+           "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "+
+           "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"";
+  var documentXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"+
+    "<w:document "+NS+"><w:body>"+out.join("")+
+    "<w:sectPr><w:pgSz w:w=\""+pd.w+"\" w:h=\""+pd.h+"\"/>"+
+    "<w:pgMar w:top=\""+MARGIN+"\" w:right=\""+MARGIN+"\" w:bottom=\""+MARGIN+"\" w:left=\""+MARGIN+"\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>"+
+    "</w:body></w:document>";
+
+  var stylesXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"+
+    "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:docDefaults>"+
+    "<w:rPrDefault><w:rPr><w:rFonts w:ascii=\""+F+"\" w:hAnsi=\""+F+"\" w:cs=\"Nirmala UI\" w:eastAsia=\""+F+"\"/><w:sz w:val=\"20\"/><w:szCs w:val=\"20\"/></w:rPr></w:rPrDefault>"+
+    "<w:pPrDefault><w:pPr><w:spacing w:after=\"0\" w:line=\"264\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault>"+
+    "</w:docDefaults><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style></w:styles>";
+
+  var contentTypesXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"+
+    "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"+
+    "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"+
+    "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"+
+    "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"+
+    "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"+
+    "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"+
+    "</Types>";
+
+  var rootRelsXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"+
+    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"+
+    "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>"+
+    "</Relationships>";
+
+  var docRelsXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"+
+    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"+
+    "<Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"+
+    (usePhoto ? "<Relationship Id=\"rIdPhoto1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/photo1.jpg\"/>" : "")+
+    "</Relationships>";
+
+  var files = [
+    {name:"[Content_Types].xml", data:strToUtf8Bytes(contentTypesXml)},
+    {name:"_rels/.rels", data:strToUtf8Bytes(rootRelsXml)},
+    {name:"word/document.xml", data:strToUtf8Bytes(documentXml)},
+    {name:"word/styles.xml", data:strToUtf8Bytes(stylesXml)},
+    {name:"word/_rels/document.xml.rels", data:strToUtf8Bytes(docRelsXml)}
+  ];
+  if(usePhoto) files.push({name:"word/media/photo1.jpg", data:imgBytes});
+
+  var blob = createZip(files);
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = (p.fullName || "resume").replace(/\s+/g,"_") + "_Resume.docx";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
 }
 
 $("#btnDocx").addEventListener("click",function(){
-  try{
-    var d = collectData();
-    var children = [];
-
-    function heading(text){
-      children.push(docxPara(docxRun(text,{bold:true,size:13,color:"12294D"}),{spacingBefore:200,spacingAfter:80}));
-    }
-    function bullet(text){
-      children.push(docxPara(docxRun("•  "+text,{size:10.5}),{bullet:true,spacingAfter:40}));
-    }
-
-    children.push(docxPara(docxRun(d.personal.fullName||"Your Full Name",{bold:true,size:26}),{spacingAfter:30}));
-    if(d.personal.jobTitle) children.push(docxPara(docxRun(d.personal.jobTitle,{italics:true,size:11.5}),{spacingAfter:60}));
-    var contactLine = [d.personal.phone,d.personal.email,d.personal.linkedin,d.personal.website,d.personal.location].filter(Boolean).join("   |   ");
-    if(contactLine) children.push(docxPara(docxRun(contactLine,{size:10}),{spacingAfter:160}));
-
-    if(d.summary){
-      heading("Professional Summary");
-      children.push(docxPara(docxRun(d.summary,{size:10.5}),{spacingAfter:160}));
-    }
-    if(d.competencies.length){
-      heading("Core Competencies");
-      d.competencies.forEach(bullet);
-    }
-    if(d.experience.length){
-      heading("Work Experience");
-      d.experience.forEach(function(exp){
-        var dateStr = [exp.start,exp.end].filter(Boolean).join(" – ");
-        children.push(docxPara(
-          docxRun((exp.title||""),{bold:true,size:11})+docxRun("   "+dateStr,{italics:true,size:10}),
-          {spacingAfter:20}
-        ));
-        var line2 = [exp.company,exp.location].filter(Boolean).join(" | ");
-        if(line2) children.push(docxPara(docxRun(line2,{size:10.5}),{spacingAfter:60}));
-        linesToArray(exp.achievements).forEach(bullet);
-        linesToArray(exp.responsibilities).forEach(bullet);
-      });
-    }
-    if(d.education.length){
-      heading("Educational Qualifications");
-      d.education.forEach(function(edu){
-        var dateStr = [edu.start,edu.end].filter(Boolean).join(" – ");
-        children.push(docxPara(
-          docxRun((edu.degree||""),{bold:true,size:11})+docxRun("   "+dateStr,{italics:true,size:10}),
-          {spacingAfter:20}
-        ));
-        if(edu.institution) children.push(docxPara(docxRun(edu.institution,{size:10.5}),{spacingAfter:100}));
-      });
-    }
-    if(d.certifications.length){
-      heading("Training & Certifications");
-      d.certifications.forEach(bullet);
-    }
-    if(d.skills.length){
-      heading("Technical Skills");
-      d.skills.forEach(bullet);
-    }
-    if(d.languages.length){
-      heading("Languages");
-      children.push(docxPara(docxRun(d.languages.join(", "),{size:10.5}),{spacingAfter:100}));
-    }
-    if(d.references){
-      heading("References");
-      children.push(docxPara(docxRun(d.references,{size:10.5}),{spacingAfter:60}));
-    }
-
-    var pageDims = {
-      A4:{w:11906,h:16838},
-      Letter:{w:12240,h:15840},
-      Legal:{w:12240,h:20160}
-    };
-    var pd = pageDims[d.pageSize] || pageDims.A4;
-    var bodyXml = children.join("") +
-      "<w:sectPr><w:pgSz w:w=\""+pd.w+"\" w:h=\""+pd.h+"\"/>"+
-      "<w:pgMar w:top=\"720\" w:right=\"720\" w:bottom=\"720\" w:left=\"720\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>";
-
-    var documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'+
-      '<w:body>'+bodyXml+'</w:body></w:document>';
-
-    var contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
-      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
-      '<Default Extension="xml" ContentType="application/xml"/>'+
-      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'+
-      '</Types>';
-
-    var rootRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'+
-      '</Relationships>';
-
-    var files = [
-      {name:"[Content_Types].xml", data: strToUtf8Bytes(contentTypesXml)},
-      {name:"_rels/.rels", data: strToUtf8Bytes(rootRelsXml)},
-      {name:"word/document.xml", data: strToUtf8Bytes(documentXml)}
-    ];
-
-    var blob = createZip(files);
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = (d.personal.fullName || "resume").replace(/\s+/g,"_") + "_Resume.docx";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-  }catch(err){
+  var d = collectData();
+  var wantPhoto = (d.template==="modern" && d.photo);
+  var prep = wantPhoto ? photoToJpegBytes(d.photo).catch(function(){ return null; }) : Promise.resolve(null);
+  prep.then(function(imgBytes){
+    buildDocx(d, imgBytes);
+  }).catch(function(err){
     console.error(err);
     alert("There was a problem creating the DOCX file. Please try again.");
-  }
+  });
 });
 
 /* ================= Live update binding ================= */
